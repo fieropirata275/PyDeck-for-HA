@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -e
+
+echo "======================================"
+echo " PyDeck 0.2.0"
+echo " Python Automation Runtime"
+echo "======================================"
 
 mkdir -p /data/projects
-
-echo "======================================"
-echo " PyDeck"
-echo " Python Automation Runtime for HA"
-echo "======================================"
 
 exec python /app/main.py

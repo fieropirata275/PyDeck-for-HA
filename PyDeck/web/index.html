@@ -4,93 +4,204 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>PyDeck</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
+  <link rel="stylesheet" href="static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
 </head>
 <body>
-  <header class="topbar">
-    <div>
-      <h1>PyDeck</h1>
-      <p>Python Automation Runtime for Home Assistant</p>
-    </div>
-    <button id="newProjectBtn" class="primary">+ Nuevo proyecto</button>
-  </header>
+<div class="app">
 
-  <main class="layout">
-    <aside class="sidebar">
-      <div class="section-title">PROYECTOS</div>
-      <div id="projectList"></div>
-    </aside>
-
-    <section class="workspace">
-      <div id="emptyState" class="empty">Crea o selecciona un proyecto.</div>
-
-      <div id="projectView" class="hidden">
-        <div class="projectHeader">
-          <div>
-            <h2 id="projectName"></h2>
-            <div id="statusLine" class="muted"></div>
-          </div>
-          <div class="actions">
-            <button id="startBtn">▶ Start</button>
-            <button id="stopBtn">■ Stop</button>
-            <button id="restartBtn">↻ Restart</button>
-            <button id="installBtn">📦 Install deps</button>
-            <button id="deleteBtn" class="danger">Delete</button>
-          </div>
-        </div>
-
-        <div class="stats">
-          <div><span>Estado</span><strong id="statState">—</strong></div>
-          <div><span>PID</span><strong id="statPid">—</strong></div>
-          <div><span>CPU</span><strong id="statCpu">—</strong></div>
-          <div><span>RAM</span><strong id="statRam">—</strong></div>
-          <div><span>Uptime</span><strong id="statUptime">—</strong></div>
-        </div>
-
-        <div class="tabs">
-          <button class="tab active" data-tab="editor">Editor</button>
-          <button class="tab" data-tab="logs">Logs</button>
-          <button class="tab" data-tab="settings">Settings</button>
-        </div>
-
-        <div id="tab-editor" class="tabPanel">
-          <div class="editorLayout">
-            <div class="filesPane">
-              <div class="filesTop">
-                <span>FILES</span>
-                <button id="newFileBtn" title="Nuevo archivo">+</button>
-              </div>
-              <div id="fileList"></div>
-            </div>
-            <div class="editorPane">
-              <div class="editorTop">
-                <span id="currentFile">Selecciona un archivo</span>
-                <button id="saveBtn" class="primary">Guardar</button>
-              </div>
-              <textarea id="editor" spellcheck="false" placeholder="Selecciona un archivo..."></textarea>
-            </div>
-          </div>
-        </div>
-
-        <div id="tab-logs" class="tabPanel hidden">
-          <pre id="logs"></pre>
-        </div>
-
-        <div id="tab-settings" class="tabPanel hidden">
-          <div class="settingsGrid">
-            <label>Nombre<input id="settingName"></label>
-            <label>Entrypoint<input id="settingEntrypoint"></label>
-            <label>Restart policy<select id="settingRestart"><option value="no">no</option><option value="on-failure">on-failure</option><option value="always">always</option></select></label>
-            <label>Restart delay (s)<input id="settingDelay" type="number" min="0"></label>
-            <label class="check"><input id="settingAutostart" type="checkbox"> Autostart</label>
-          </div>
-          <button id="saveSettingsBtn" class="primary">Guardar settings</button>
-        </div>
+  <!-- ───────── Sidebar ───────── -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo">
+        <svg class="i" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m8 9 3 3-3 3M13 15h3"/></svg>
       </div>
+      <div>
+        <h1>PyDeck</h1>
+        <p>Python Runtime · Home Assistant</p>
+      </div>
+    </div>
+
+    <button id="newBtn" class="btn btn-primary btn-block">
+      <svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+      Nuevo proyecto
+    </button>
+
+    <div class="search">
+      <svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="projectSearch" class="input" placeholder="Buscar proyecto…" autocomplete="off" spellcheck="false">
+    </div>
+
+    <div class="section-title"><span>Proyectos</span><span id="projectCount" class="count">0</span></div>
+    <nav id="projects" class="projectList"></nav>
+
+    <div class="sidebar-foot">
+      <span>PyDeck</span>
+      <span><kbd>Ctrl</kbd> <kbd>S</kbd> guardar</span>
+    </div>
+  </aside>
+
+  <!-- ───────── Main ───────── -->
+  <main class="main">
+
+    <div id="empty" class="empty">
+      <div class="empty-inner">
+        <div class="empty-icon">
+          <svg class="i" viewBox="0 0 24 24"><path d="m16 18 6-6-6-6M8 6l-6 6 6 6"/></svg>
+        </div>
+        <h3>Ningún proyecto seleccionado</h3>
+        <p>Elige un proyecto de la barra lateral o crea uno nuevo para empezar.</p>
+        <button id="emptyNewBtn" class="btn btn-primary">
+          <svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          Crear proyecto
+        </button>
+      </div>
+    </div>
+
+    <section id="workspace" class="workspace" hidden>
+
+      <header class="projectHeader">
+        <div class="titleBlock">
+          <div class="titleRow">
+            <h2 id="title"></h2>
+            <span id="statusBadge" class="badge">—</span>
+          </div>
+          <div id="meta" class="meta"></div>
+        </div>
+
+        <div class="actions">
+          <div class="btnGroup">
+            <button id="startBtn" class="btn btn-ok" data-act="start" title="Iniciar">
+              <svg class="i fill" viewBox="0 0 24 24"><path d="M7 4.5v15l12.5-7.5z"/></svg>Start
+            </button>
+            <button id="stopBtn" class="btn" data-act="stop" title="Detener">
+              <svg class="i fill" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>Stop
+            </button>
+            <button id="restartBtn" class="btn" data-act="restart" title="Reiniciar">
+              <svg class="i" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg>Restart
+            </button>
+          </div>
+          <button id="testBtn" class="btn" data-act="test" title="Ejecutar en modo test">
+            <svg class="i" viewBox="0 0 24 24"><path d="M9 3h6M10 3v6L4.5 18.5A1.7 1.7 0 0 0 6 21h12a1.7 1.7 0 0 0 1.5-2.5L14 9V3"/><path d="M7 15h10"/></svg>Test
+          </button>
+          <button id="installBtn" class="btn" title="pip install -r requirements.txt">
+            <svg class="i" viewBox="0 0 24 24"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5M12 22V12"/></svg>
+            Install deps
+          </button>
+        </div>
+      </header>
+
+      <section class="card">
+        <nav class="tabs">
+          <button class="tabBtn active" data-tab="files">
+            <svg class="i" viewBox="0 0 24 24"><path d="m16 18 6-6-6-6M8 6l-6 6 6 6"/></svg>Archivos
+          </button>
+          <button class="tabBtn" data-tab="terminal">
+            <svg class="i" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m6 9 3 3-3 3M12 15h5"/></svg>Terminal
+            <span id="termDot" class="miniDot" title="Desconectado"></span>
+          </button>
+          <button class="tabBtn" data-tab="logs">
+            <svg class="i" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Logs
+          </button>
+        </nav>
+
+        <div class="panels">
+
+          <!-- Archivos -->
+          <div id="tab-files" class="tab">
+            <div class="editorLayout">
+              <div class="filesPane">
+                <div class="paneHead">
+                  <span>Archivos</span>
+                  <button id="refreshFilesBtn" class="btn btn-ghost btn-icon btn-sm" title="Recargar lista">
+                    <svg class="i" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg>
+                  </button>
+                </div>
+                <div id="files"></div>
+              </div>
+
+              <div class="editorPane" id="editorPane">
+                <div class="editorTop">
+                  <div class="filePath">
+                    <svg class="i" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+                    <span id="fileName">Selecciona un archivo</span>
+                    <span class="dirty" title="Cambios sin guardar"></span>
+                  </div>
+                  <button id="saveBtn" class="btn btn-primary btn-sm" disabled>
+                    <svg class="i" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>
+                    Guardar
+                  </button>
+                </div>
+                <div class="code">
+                  <pre id="gutter" class="gutter" aria-hidden="true">1</pre>
+                  <textarea id="editor" spellcheck="false" wrap="off" autocapitalize="off" autocomplete="off" placeholder="Selecciona un archivo de la lista…" disabled></textarea>
+                </div>
+                <div class="statusbar">
+                  <span id="cursorPos">Ln 1, Col 1</span>
+                  <span id="dirtyLabel"></span>
+                  <span class="right" id="fileLang">—</span>
+                  <span>UTF-8</span>
+                  <span>Espacios: 4</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Terminal -->
+          <div id="tab-terminal" class="tab" hidden>
+            <div class="paneHead toolHead">
+              <span id="termState" class="termState">Desconectado</span>
+              <span class="spacer"></span>
+              <button id="termClearBtn" class="btn btn-ghost btn-sm" title="Limpiar pantalla">
+                <svg class="i" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>Limpiar
+              </button>
+              <button id="termReconnectBtn" class="btn btn-ghost btn-sm" title="Reconectar">
+                <svg class="i" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg>Reconectar
+              </button>
+            </div>
+            <div class="termWrap"><div id="terminal"></div></div>
+          </div>
+
+          <!-- Logs -->
+          <div id="tab-logs" class="tab" hidden>
+            <div class="paneHead toolHead">
+              <div class="search search-sm">
+                <svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+                <input id="logFilter" class="input" placeholder="Filtrar logs…" autocomplete="off" spellcheck="false">
+              </div>
+              <span id="logCount" class="logCount"></span>
+              <span class="spacer"></span>
+              <label class="switch"><input id="logFollow" type="checkbox" checked><span>Seguir</span></label>
+              <label class="switch"><input id="logWrap" type="checkbox" checked><span>Ajustar</span></label>
+              <button id="copyLogsBtn" class="btn btn-ghost btn-sm" title="Copiar logs">
+                <svg class="i" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>Copiar
+              </button>
+            </div>
+            <pre id="logs"></pre>
+          </div>
+
+        </div>
+      </section>
     </section>
   </main>
+</div>
 
-  <div id="toast"></div>
-  <script src="app.js"></script>
+<dialog id="modal">
+  <div class="modalBody">
+    <h3 id="modalTitle"></h3>
+    <p id="modalMsg"></p>
+    <input id="modalInput" class="input" autocomplete="off" spellcheck="false">
+    <pre id="modalPre"></pre>
+  </div>
+  <div class="modalFoot">
+    <button type="button" id="modalCancel" class="btn btn-ghost">Cancelar</button>
+    <button type="button" id="modalOk" class="btn btn-primary">Aceptar</button>
+  </div>
+</dialog>
+
+<div id="toast" role="status" aria-live="polite"></div>
+<script src="static/app.js"></script>
 </body>
 </html>

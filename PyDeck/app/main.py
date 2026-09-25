@@ -1,256 +1,185 @@
 from __future__ import annotations
-
-import asyncio
-import json
-from contextlib import asynccontextmanager
+import os, json, asyncio, pty, select, struct, fcntl, termios, signal, shutil
 from pathlib import Path
-from typing import Any
-
-import uvicorn
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from fastapi.responses import HTMLResponse, FileResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
+import uvicorn
 
-from ha_client import call_service, get_state
-from manager import PROJECTS_DIR, ProjectManager, load_config, project_dir, save_config
+from manager import (
+    PROJECTS_DIR, create_project, project_dir, metadata, save_metadata,
+    status, start_project, stop_project, restart_project, install_requirements,
+    load_env, ensure_venv
+)
 
-manager = ProjectManager()
-WEB_DIR = Path("/web")
+app = FastAPI(title="PyDeck", version="0.2.0")
+WEB = Path("/web")
+app.mount("/static", StaticFiles(directory=WEB), name="static")
 
-
-class CreateProject(BaseModel):
-    id: str
-    name: str | None = None
-
-
-class SaveFile(BaseModel):
-    content: str
-
-
-class SettingsPayload(BaseModel):
-    name: str | None = None
-    entrypoint: str | None = None
-    autostart: bool | None = None
-    restart_policy: str | None = None
-    restart_delay: int | None = None
-
-
-class ServiceCallPayload(BaseModel):
-    domain: str
-    service: str
-    data: dict[str, Any] = {}
-
-
-def safe_file(project_id: str, relpath: str) -> Path:
-    base = project_dir(project_id).resolve()
-    target = (base / relpath).resolve()
-    if base != target and base not in target.parents:
-        raise HTTPException(400, "Invalid path")
-    if ".venv" in target.parts:
-        raise HTTPException(403, "The .venv folder is hidden")
-    return target
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    manager.autostart()
-    yield
-    for p in list(manager.runtimes):
-        try:
-            manager.stop(p, force=True)
-        except Exception:
-            pass
-
-
-app = FastAPI(title="PyDeck", version="0.1.0", lifespan=lifespan)
-
-
-@app.get("/")
-async def index():
-    return FileResponse(WEB_DIR / "index.html")
-
-
-@app.get("/app.js")
-async def app_js():
-    return FileResponse(WEB_DIR / "app.js", media_type="application/javascript")
-
-
-@app.get("/style.css")
-async def style_css():
-    return FileResponse(WEB_DIR / "style.css", media_type="text/css")
-
+@app.get("/", response_class=HTMLResponse)
+async def home():
+    return (WEB/"index.html").read_text()
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "service": "PyDeck", "version": "0.1.0"}
-
+    return {"status":"ok","service":"PyDeck","version":"0.2.0"}
 
 @app.get("/api/projects")
-async def projects():
-    return {"projects": manager.list_projects()}
+async def list_projects():
+    items=[]
+    for p in sorted(PROJECTS_DIR.iterdir()):
+        if p.is_dir():
+            pid=p.name
+            items.append({"id":pid,"meta":metadata(pid),"runtime":status(pid)})
+    return {"projects":items}
 
-
-@app.post("/api/projects")
-async def create_project(payload: CreateProject):
-    try:
-        return manager.create_project(payload.id, payload.name)
-    except FileExistsError:
-        raise HTTPException(409, "Project already exists")
-    except ValueError as exc:
-        raise HTTPException(400, str(exc))
-
+@app.post("/api/projects/{project_id}")
+async def api_create(project_id: str):
+    create_project(project_id)
+    return {"ok":True}
 
 @app.delete("/api/projects/{project_id}")
-async def delete_project(project_id: str):
-    try:
-        manager.delete_project(project_id)
-        return {"ok": True}
-    except FileNotFoundError:
-        raise HTTPException(404, "Project not found")
-
-
-@app.get("/api/projects/{project_id}/status")
-async def status(project_id: str):
-    try:
-        return manager.status(project_id)
-    except FileNotFoundError:
-        raise HTTPException(404, "Project not found")
-
+async def api_delete(project_id: str):
+    stop_project(project_id)
+    p=project_dir(project_id)
+    if p.exists():
+        shutil.rmtree(p)
+    return {"ok":True}
 
 @app.post("/api/projects/{project_id}/start")
-async def start(project_id: str, install: bool = False):
-    try:
-        return await asyncio.to_thread(manager.start, project_id, install)
-    except Exception as exc:
-        raise HTTPException(500, str(exc))
+async def api_start(project_id: str):
+    return {"pid":start_project(project_id)}
 
+@app.post("/api/projects/{project_id}/test")
+async def api_test(project_id: str):
+    return {"pid":start_project(project_id, extra_args=["--test"])}
 
 @app.post("/api/projects/{project_id}/stop")
-async def stop(project_id: str):
-    try:
-        return await asyncio.to_thread(manager.stop, project_id, True)
-    except Exception as exc:
-        raise HTTPException(500, str(exc))
-
+async def api_stop(project_id: str):
+    stop_project(project_id)
+    return {"ok":True}
 
 @app.post("/api/projects/{project_id}/restart")
-async def restart(project_id: str):
-    try:
-        return await asyncio.to_thread(manager.restart, project_id)
-    except Exception as exc:
-        raise HTTPException(500, str(exc))
-
+async def api_restart(project_id: str):
+    return {"pid":restart_project(project_id)}
 
 @app.post("/api/projects/{project_id}/install")
-async def install(project_id: str):
-    try:
-        await asyncio.to_thread(manager.install_requirements, project_id)
-        return {"ok": True}
-    except Exception as exc:
-        raise HTTPException(500, str(exc))
+async def api_install(project_id: str):
+    result = install_requirements(project_id)
+    return {"returncode":result.returncode,"stdout":result.stdout,"stderr":result.stderr}
 
-
-@app.get("/api/projects/{project_id}/logs")
-async def logs(project_id: str, tail: int = 500):
-    return {"lines": manager.logs(project_id, tail)}
-
-
-@app.get("/api/projects/{project_id}/settings")
-async def settings(project_id: str):
-    try:
-        return load_config(project_id)
-    except FileNotFoundError:
-        raise HTTPException(404, "Project not found")
-
-
-@app.put("/api/projects/{project_id}/settings")
-async def update_settings(project_id: str, payload: SettingsPayload):
-    try:
-        cfg = load_config(project_id)
-    except FileNotFoundError:
-        raise HTTPException(404, "Project not found")
-    for key, value in payload.model_dump(exclude_none=True).items():
-        cfg[key] = value
-    if cfg.get("restart_policy") not in {"no", "on-failure", "always"}:
-        raise HTTPException(400, "Invalid restart_policy")
-    save_config(project_id, cfg)
-    return cfg
-
+@app.get("/api/projects/{project_id}/status")
+async def api_status(project_id: str):
+    return status(project_id)
 
 @app.get("/api/projects/{project_id}/files")
-async def files(project_id: str):
-    base = project_dir(project_id)
-    if not base.exists():
-        raise HTTPException(404, "Project not found")
-    items = []
-    for p in sorted(base.rglob("*")):
-        if ".venv" in p.parts:
+async def api_files(project_id: str):
+    p=project_dir(project_id)
+    if not p.exists():
+        raise HTTPException(404)
+    out=[]
+    for f in p.rglob("*"):
+        if ".venv" in f.parts or ".home" in f.parts:
             continue
-        if p.is_file():
-            items.append(str(p.relative_to(base)))
-    return {"files": items}
+        if f.is_file():
+            out.append(str(f.relative_to(p)))
+    return {"files":sorted(out)}
 
+def safe_file(project_id: str, rel: str):
+    p=project_dir(project_id)
+    f=(p/rel).resolve()
+    if p.resolve() not in f.parents and f != p.resolve():
+        raise HTTPException(400,"Invalid path")
+    return f
 
 @app.get("/api/projects/{project_id}/file")
 async def read_file(project_id: str, path: str):
-    target = safe_file(project_id, path)
-    if not target.exists() or not target.is_file():
-        raise HTTPException(404, "File not found")
-    try:
-        return {"path": path, "content": target.read_text(encoding="utf-8")}
-    except UnicodeDecodeError:
-        raise HTTPException(415, "Only text files can be edited")
-
+    f=safe_file(project_id,path)
+    if not f.exists() or not f.is_file():
+        raise HTTPException(404)
+    return PlainTextResponse(f.read_text())
 
 @app.put("/api/projects/{project_id}/file")
-async def write_file(project_id: str, path: str, payload: SaveFile):
-    target = safe_file(project_id, path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(payload.content, encoding="utf-8")
-    return {"ok": True, "path": path}
+async def write_file(project_id: str, path: str, body: dict):
+    f=safe_file(project_id,path)
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(body.get("content",""))
+    return {"ok":True}
 
+@app.get("/api/projects/{project_id}/logs")
+async def logs(project_id: str):
+    p=project_dir(project_id)/"logs"/"runtime.log"
+    if not p.exists():
+        return PlainTextResponse("")
+    return PlainTextResponse(p.read_text(errors="replace")[-200000:])
 
-@app.delete("/api/projects/{project_id}/file")
-async def delete_file(project_id: str, path: str):
-    target = safe_file(project_id, path)
-    if not target.exists() or not target.is_file():
-        raise HTTPException(404, "File not found")
-    target.unlink()
-    return {"ok": True}
+@app.websocket("/ws/terminal/{project_id}")
+async def terminal_ws(ws: WebSocket, project_id: str):
+    await ws.accept()
+    p = create_project(project_id)
+    env = load_env(project_id)
+    pid, fd = pty.fork()
+    if pid == 0:
+        os.chdir(p)
+        os.execvpe("/bin/bash", ["/bin/bash","--noprofile","--norc"], env)
 
+    loop = asyncio.get_running_loop()
 
-@app.get("/api/ha/state/{entity_id:path}")
-async def ha_state(entity_id: str):
+    async def reader():
+        try:
+            while True:
+                data = await loop.run_in_executor(None, os.read, fd, 4096)
+                if not data:
+                    break
+                await ws.send_bytes(data)
+        except Exception:
+            pass
+
+    read_task = asyncio.create_task(reader())
     try:
-        return await get_state(entity_id)
-    except Exception as exc:
-        raise HTTPException(502, str(exc))
-
-
-@app.post("/api/ha/service")
-async def ha_service(payload: ServiceCallPayload):
-    try:
-        return await call_service(payload.domain, payload.service, payload.data)
-    except Exception as exc:
-        raise HTTPException(502, str(exc))
-
-
-@app.websocket("/api/projects/{project_id}/logs/ws")
-async def logs_ws(websocket: WebSocket, project_id: str):
-    await websocket.accept()
-    sent = 0
-    try:
+        await ws.send_text(f"\r\n[PyDeck] terminal for {project_id}\r\n")
         while True:
-            lines = manager.logs(project_id, 3000)
-            if sent > len(lines):
-                sent = 0
-            for line in lines[sent:]:
-                await websocket.send_text(line)
-            sent = len(lines)
-            await asyncio.sleep(0.75)
+            msg = await ws.receive()
+            if msg.get("type") == "websocket.disconnect":
+                break
+            if "bytes" in msg and msg["bytes"] is not None:
+                os.write(fd, msg["bytes"])
+            elif "text" in msg and msg["text"] is not None:
+                text = msg["text"]
+                if text.startswith("__PYDECK_RESIZE__:"):
+                    try:
+                        _, cols, rows = text.split(":")
+                        winsize = struct.pack("HHHH", int(rows), int(cols), 0, 0)
+                        fcntl.ioctl(fd, termios.TIOCSWINSZ, winsize)
+                    except Exception:
+                        pass
+                else:
+                    os.write(fd, text.encode())
     except WebSocketDisconnect:
         pass
+    finally:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except Exception:
+            pass
+        try:
+            os.close(fd)
+        except Exception:
+            pass
+        read_task.cancel()
 
+# autostart
+@app.on_event("startup")
+async def startup():
+    PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
+    for p in PROJECTS_DIR.iterdir():
+        if p.is_dir():
+            cfg = metadata(p.name)
+            if cfg.get("autostart"):
+                try:
+                    start_project(p.name)
+                except Exception as e:
+                    print(f"[PyDeck] autostart failed for {p.name}: {e}", flush=True)
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8099, log_level="info")
+    uvicorn.run(app, host="0.0.0.0", port=8099)

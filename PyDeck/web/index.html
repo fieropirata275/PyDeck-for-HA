@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>PyDeck</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>PyDeck</h1>
+      <p>Python Automation Runtime for Home Assistant</p>
+    </div>
+    <button id="newProjectBtn" class="primary">+ Nuevo proyecto</button>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <div class="section-title">PROYECTOS</div>
+      <div id="projectList"></div>
+    </aside>
+
+    <section class="workspace">
+      <div id="emptyState" class="empty">Crea o selecciona un proyecto.</div>
+
+      <div id="projectView" class="hidden">
+        <div class="projectHeader">
+          <div>
+            <h2 id="projectName"></h2>
+            <div id="statusLine" class="muted"></div>
+          </div>
+          <div class="actions">
+            <button id="startBtn">▶ Start</button>
+            <button id="stopBtn">■ Stop</button>
+            <button id="restartBtn">↻ Restart</button>
+            <button id="installBtn">📦 Install deps</button>
+            <button id="deleteBtn" class="danger">Delete</button>
+          </div>
+        </div>
+
+        <div class="stats">
+          <div><span>Estado</span><strong id="statState">—</strong></div>
+          <div><span>PID</span><strong id="statPid">—</strong></div>
+          <div><span>CPU</span><strong id="statCpu">—</strong></div>
+          <div><span>RAM</span><strong id="statRam">—</strong></div>
+          <div><span>Uptime</span><strong id="statUptime">—</strong></div>
+        </div>
+
+        <div class="tabs">
+          <button class="tab active" data-tab="editor">Editor</button>
+          <button class="tab" data-tab="logs">Logs</button>
+          <button class="tab" data-tab="settings">Settings</button>
+        </div>
+
+        <div id="tab-editor" class="tabPanel">
+          <div class="editorLayout">
+            <div class="filesPane">
+              <div class="filesTop">
+                <span>FILES</span>
+                <button id="newFileBtn" title="Nuevo archivo">+</button>
+              </div>
+              <div id="fileList"></div>
+            </div>
+            <div class="editorPane">
+              <div class="editorTop">
+                <span id="currentFile">Selecciona un archivo</span>
+                <button id="saveBtn" class="primary">Guardar</button>
+              </div>
+              <textarea id="editor" spellcheck="false" placeholder="Selecciona un archivo..."></textarea>
+            </div>
+          </div>
+        </div>
+
+        <div id="tab-logs" class="tabPanel hidden">
+          <pre id="logs"></pre>
+        </div>
+
+        <div id="tab-settings" class="tabPanel hidden">
+          <div class="settingsGrid">
+            <label>Nombre<input id="settingName"></label>
+            <label>Entrypoint<input id="settingEntrypoint"></label>
+            <label>Restart policy<select id="settingRestart"><option value="no">no</option><option value="on-failure">on-failure</option><option value="always">always</option></select></label>
+            <label>Restart delay (s)<input id="settingDelay" type="number" min="0"></label>
+            <label class="check"><input id="settingAutostart" type="checkbox"> Autostart</label>
+          </div>
+          <button id="saveSettingsBtn" class="primary">Guardar settings</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast"></div>
+  <script src="app.js"></script>
+</body>
+</html>

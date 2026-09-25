@@ -1,0 +1,21 @@
+name: "PyDeck"
+version: "0.1.0"
+slug: "pydeck"
+description: "Python project and automation manager for Home Assistant"
+url: "https://github.com/example/pydeck"
+arch:
+  - amd64
+  - aarch64
+startup: application
+boot: auto
+init: false
+ingress: true
+ingress_port: 8099
+panel_icon: mdi:language-python
+panel_title: PyDeck
+panel_admin: true
+homeassistant_api: true
+options:
+  log_level: info
+schema:
+  log_level: list(debug|info|warning|error)
